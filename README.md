@@ -1,6 +1,5 @@
-# Web Scraping Stock Dataset
 
-# Stock Market Data Wrangling in R
+# Web Scraping of Stock Market DataSet Using R : Documentation
 
 ## Overview
 This project provides a comprehensive end-to-end data pipeline for stock market analysis. It covers various aspects, including data collection through web scraping, data wrangling, enrichment, and analysis. The ultimate objective is to generate a structured and enriched dataset that aids investment decision-making by leveraging visualizations and key performance metrics.
@@ -92,13 +91,17 @@ The dataset underwent rigorous cleaning and transformation to ensure accuracy an
 The dataset enables in-depth stock market analysis through visualizations.
 
 ### Stock Price Distribution
-![Stock Price Distribution](PLACEHOLDER)
+![Stock Price Distribution](https://github.com/user-attachments/assets/4f535ff5-c3c4-4b3c-b2b4-7c8707b5eaaa)
 
 ### Sector-wise Performance
-![Sector-wise Performance](PLACEHOLDER)
+![Sector-wise Performance](https://github.com/user-attachments/assets/b7bb8d12-e4a2-47fc-893f-d90fb9001278)
+
 
 ### Most Volatile Stocks
-![Most Volatile Stocks](PLACEHOLDER)
+![Most Volatile Stocks](https://github.com/user-attachments/assets/becc5c2b-e22f-4f65-b2e3-f9b6dc23a106)
+
+
+
 
 ## Potential Use Cases
 The cleaned dataset can be utilized in various financial analyses and predictive modeling applications:
@@ -130,9 +133,13 @@ Several challenges were encountered during data collection and processing. Below
 ## Final Deliverables
 The project outputs include:
 - **Final Cleaned Dataset (CSV format)**:
-  - [`final_merged_dataset.csv`](PLACEHOLDER_LINK)
+  - [`final_merged_dataset.csv`](https://github.com/yashnayan8795/Web-Scrapping-Stock-Dataset/blob/main/Dataset/final_merged_dataset.csv)
 - **Summary Visualizations and Insights**:
   - Comprehensive data quality assessments and stock market trends.
+    ![Price Change vs Volatility](https://github.com/user-attachments/assets/c4ff2227-4d4e-446d-bdd1-a624fa8b20d2)
 
 ---
 This dataset provides valuable insights into market trends, investment strategies, and financial decision-making. By leveraging this dataset, analysts and investors can make data-driven decisions for effective stock portfolio management.
+
+---
+YASH NAYAN    22BDS0274
