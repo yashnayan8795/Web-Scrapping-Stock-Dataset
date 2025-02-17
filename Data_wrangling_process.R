@@ -1,0 +1,315 @@
+# Loading necessary libraries
+suppressPackageStartupMessages({
+  library(tidyverse)    
+  library(lubridate)    
+  library(ggplot2)      
+  library(pander)      
+  library(textdata)
+  library(syuzhet)      
+})
+
+## **1.Discover: Load and Inspect the Dataset**
+
+# Load dataset
+stock_data_analysis <- read_csv("final_merged_dataset.csv")
+stock_data<-as_data_frame(stock_data_analysis)
+# Displaying dataset structure
+glimpse(stock_data)
+# Viewing Structure and Summary
+str(stock_data)
+# Summary statistics
+summary(stock_data)
+#Finding out the total Dimension of the data i.e Number of rows & columns
+dim(stock_data)
+# Column names
+colnames(stock_data)  
+head(stock_data,5)
+
+## **2. Structure the Data**
+
+# Converting all character columns to factors
+stock_data <- stock_data %>%
+  mutate(across(where(is.character), as.factor))
+# Ensuring Symbol is character (if needed)
+stock_data <- stock_data %>%
+  mutate(Symbol = as.character(Symbol))
+# Renaming columns for clarity
+stock_data <- stock_data %>%
+  rename(
+    Company_Name   = Company, 
+    Closing_Price  = avg_close,
+    Opening_Price  = avg_open,
+    High_Price     = avg_high,
+    Low_Price      = avg_low,
+    Trade_Volume   = avg_volume,
+    Industry_Type  = Industry
+  )
+# Converting date columns to proper date format if present
+date_columns <- c("Date", "Year", "Founded")  # Modifying these based on actual column names
+for (col in date_columns) {
+  if (col %in% colnames(stock_data)) {
+    stock_data[[col]] <- as.Date(stock_data[[col]], format = "%Y-%m-%d")
+  }
+}
+# Rearranging columns for logical flow
+stock_data <- stock_data %>%
+  select(Symbol, Company_Name, Industry_Type, Closing_Price, Opening_Price, 
+         High_Price, Low_Price, Trade_Volume, everything())
+# Pivoting from wide to long format if you have multiple avg_ columns for different years
+if ("Year" %in% colnames(stock_data)) {
+  # Checking if there are columns that start with "avg_"
+  columns_to_pivot <- names(stock_data)[grepl("^avg_", names(stock_data))]
+  
+  if (length(columns_to_pivot) > 0) {
+    stock_data_long <- stock_data %>%
+      pivot_longer(cols = all_of(columns_to_pivot), 
+                   names_to = "Metric", 
+                   values_to = "Value")
+  } else {
+    message("No columns found for pivoting.")
+    stock_data_long <- stock_data  # Fallback: use original data
+  }
+} else {
+  message("Column 'Year' not found in dataset; skipping pivoting.")
+  stock_data_long <- stock_data  # Fallback: use original data
+}
+# Removing unnecessary or redundant columns (example)
+unnecessary_columns <- c("Index_Weighting", "Notes")  # Update if these exist in your data
+stock_data <- stock_data %>% 
+  select(-all_of(intersect(colnames(stock_data), unnecessary_columns)))
+# Displaying updated structure
+glimpse(stock_data)
+# Counting distinct values in each column
+distinct_counts <- sapply(stock_data, function(x) length(unique(x)))
+distinct_counts
+
+
+## **3. Data Cleaning**
+
+# 3A. Handling missing values
+# Numeric columns: replace NA with median
+# Factor/character columns: replace NA with "Unknown"
+stock_data <- stock_data %>%
+  mutate(across(where(is.numeric), ~ replace_na(., median(., na.rm = TRUE)))) %>%
+  mutate(across(where(is.character), ~ replace_na(., "Unknown")))
+# 3B. Removing duplicate rows
+stock_data <- stock_data %>% distinct()
+# 3C. Identifing outliers (using Closing_Price as an example)
+## Outlier Detection and Removal for Trade_Volume (Updated)
+# Boxplot for Trade_Volume with Log Scale
+trade_volume_boxplot <- ggplot(stock_data, aes(x = "", y = Trade_Volume)) + 
+  geom_boxplot(fill = "lightblue", color = "darkblue") +
+  scale_y_log10() +  # Apply log scale to handle large values
+  ggtitle("Boxplot of Trade Volume (Log Scale)") +
+  xlab("") +
+  ylab("Trade Volume (Log Scale)")
+# Displaying the boxplot
+print(trade_volume_boxplot)
+# Calculate Quartiles and IQR for Trade_Volume
+Q1_tv <- quantile(stock_data$Trade_Volume, 0.25, na.rm = TRUE)
+Q3_tv <- quantile(stock_data$Trade_Volume, 0.75, na.rm = TRUE)
+IQR_tv <- Q3_tv - Q1_tv
+# Define outlier bounds using 1.5 * IQR
+lower_bound_tv <- Q1_tv - 1.5 * IQR_tv
+upper_bound_tv <- Q3_tv + 1.5 * IQR_tv
+# Printing summary statistics and outlier bounds
+cat("Trade Volume Statistics:\n")
+cat("Q1 = ", Q1_tv, "\n")
+cat("Q3 = ", Q3_tv, "\n")
+cat("IQR = ", IQR_tv, "\n")
+cat("Lower Bound = ", lower_bound_tv, "\n")
+cat("Upper Bound = ", upper_bound_tv, "\n\n")
+# Removing outliers based on IQR method
+stock_data_cleaned <- stock_data %>% 
+  filter(Trade_Volume >= lower_bound_tv, Trade_Volume <= upper_bound_tv)
+# Calculating the number of outliers removed
+num_outliers <- nrow(stock_data) - nrow(stock_data_cleaned)
+cat("Number of outliers removed from Trade_Volume: ", num_outliers, "\n\n")
+# Interpretation of Results
+cat("Interpretation:\n")
+cat("Using a log scale for Trade_Volume compresses extreme values, making the boxplot easier to interpret.\n")
+cat("The IQR method identifies values below ", lower_bound_tv, " and above ", upper_bound_tv, " as potential outliers.\n")
+cat("Removing these outliers helps reduce skewness and allows for a more accurate representation of typical trading activity.\n")
+
+
+## **4. Enrichment(Feature Engineering)**
+
+# Filtering rows to only keep data from 2023
+stock_data <- stock_data %>%
+  filter(Year == 2023)
+# Checking how many rows remain
+cat("Number of rows after keeping only 2023 data:", nrow(stock_data), "\n")
+# Peek at the first few rows of the updated dataset
+head(stock_data)
+# Existing enrichment:
+# Step 1: Add a new column for price change percentage
+stock_data <- stock_data %>%
+  mutate(price_change_pct = ((Closing_Price - Opening_Price) / Opening_Price) * 100)
+
+stock_data <- stock_data %>%
+  mutate(
+    price_change_pct = ((Closing_Price - Opening_Price) / Opening_Price) * 100,
+    volatility_pct   = ((High_Price - Low_Price) / Opening_Price) * 100
+  )
+
+# Step 2: Define price_sentiment based on thresholds for price_change_pct and volatility_pct
+stock_data <- stock_data %>%
+  mutate(
+    price_sentiment = case_when(
+      price_change_pct > 2 & volatility_pct < 15   ~ "Positive",
+      price_change_pct > 2 & volatility_pct >= 15  ~ "Positive but Volatile",
+      price_change_pct < -2 & volatility_pct < 15  ~ "Negative",
+      price_change_pct < -2 & volatility_pct >= 15 ~ "Negative and Volatile",
+      TRUE                                         ~ "Neutral"
+    )
+  )
+
+## Scatter Plot: Price Change vs. Volatility colored by Price Sentiment
+sentiment_scatter <- ggplot(stock_data, aes(x = price_change_pct, y = volatility_pct, color = price_sentiment)) +
+  geom_point(alpha = 0.7, size = 3) +
+  ggtitle("Price Change vs. Volatility by Sentiment") +
+  xlab("Price Change (%)") +
+  ylab("Volatility (%)") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1")
+print(sentiment_scatter)
+# New enrichment: Calculate volatility percentage as a relative measure of price range
+stock_data <- stock_data %>%
+  mutate(volatility_pct = ((High_Price - Low_Price) / Opening_Price) * 100)
+# New enrichment: Calculate absolute price range (High_Price - Low_Price)
+stock_data <- stock_data %>%
+  mutate(price_range = High_Price - Low_Price)
+# New enrichment: Categorize market movement based on price change percentage
+stock_data <- stock_data %>%
+  mutate(market_movement = case_when(
+    price_change_pct >= 5   ~ "Strong Bullish",
+    price_change_pct >= 0   ~ "Bullish",
+    price_change_pct == 0   ~ "Neutral",
+    price_change_pct > -5   ~ "Bearish",
+    price_change_pct <= -5  ~ "Strong Bearish"
+  ))
+# New enrichment: Categorize Trade_Volume into 'Low', 'Medium', and 'High' based on quantiles
+# First, calculate quantiles for Trade_Volume (0%, 33%, 66%, and 100%)
+volume_quantiles <- quantile(stock_data$Trade_Volume, probs = c(0, 0.33, 0.66, 1), na.rm = TRUE)
+stock_data <- stock_data %>%
+  mutate(volume_category = cut(Trade_Volume,
+                               breaks = volume_quantiles,
+                               labels = c("Low", "Medium","High"),
+                               include.lowest = TRUE))
+# Previewing the enriched data
+cat("Enriched Data Sample:\n")
+head(stock_data, 5)
+
+## **5. Data Validation and Consistency Checks**
+
+# 5A. Checking for Missing Values 
+missing_values <- colSums(is.na(stock_data))
+cat("Missing Values Count per Column:\n")
+print(missing_values)
+# Ploting missing values per column for visualization
+library(ggplot2)
+missing_df <- data.frame(Column = names(missing_values),
+                         MissingCount = as.numeric(missing_values))
+ggplot(missing_df, aes(x = reorder(Column, -MissingCount), y = MissingCount)) +
+  geom_bar(stat = "identity", fill = "tomato") +
+  ggtitle("Missing Values per Column") +
+  xlab("Columns") +
+  ylab("Missing Value Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+stock_data <- stock_data %>%
+  select(-Founded)
+colnames(stock_data)
+# 5B. Uniqueness Check 
+# Checking for duplicate entries by Symbol and Year (if Year exists)
+if ("Year" %in% colnames(stock_data)) {
+  duplicate_entries <- stock_data %>% 
+    group_by(Symbol, Year) %>% 
+    filter(n() > 1)
+  duplicate_count <- nrow(duplicate_entries)
+  cat("Number of duplicate entries based on Symbol and Year:", duplicate_count, "\n")
+} else {
+  duplicate_entries <- stock_data %>% 
+    group_by(Symbol) %>% 
+    filter(n() > 1)
+  duplicate_count <- nrow(duplicate_entries)
+  cat("Number of duplicate entries based on Symbol:", duplicate_count, "\n")
+}
+# 5C. Performing the Range Validation 
+range_validation <- stock_data %>% 
+  summarise(
+    min_Closing_Price = min(Closing_Price, na.rm = TRUE),
+    max_Closing_Price = max(Closing_Price, na.rm = TRUE),
+    min_Opening_Price = min(Opening_Price, na.rm = TRUE),
+    max_Opening_Price = max(Opening_Price, na.rm = TRUE),
+    min_High_Price    = min(High_Price, na.rm = TRUE),
+    max_High_Price    = max(High_Price, na.rm = TRUE),
+    min_Low_Price     = min(Low_Price, na.rm = TRUE),
+    max_Low_Price     = max(Low_Price, na.rm = TRUE),
+    min_Trade_Volume  = min(Trade_Volume, na.rm = TRUE),
+    max_Trade_Volume  = max(Trade_Volume, na.rm = TRUE)
+  )
+cat("Range Validation Summary:\n")
+print(range_validation)
+# 5D. Consistency Checks 
+# Ensuring logical ordering of price columns:
+# Check that: Low_Price <= Opening_Price <= Closing_Price <= High_Price
+consistency_issues <- stock_data %>% 
+  filter(!(Low_Price <= Opening_Price & Opening_Price <= Closing_Price & Closing_Price <= High_Price))
+if(nrow(consistency_issues) > 0){
+  cat("Consistency issues found in the following rows:\n")
+  print(consistency_issues)
+} else {
+  cat("No consistency issues found: Low_Price <= Opening_Price <= Closing_Price <= High_Price holds for all rows.\n")
+}
+# 5E. Outlier Detection 
+# Define a function to detect outliers using the IQR method
+detect_outliers <- function(x) {
+  Q1 <- quantile(x, 0.25, na.rm = TRUE)
+  Q3 <- quantile(x, 0.75, na.rm = TRUE)
+  IQR_val <- Q3 - Q1
+  lower_bound <- Q1 - 1.5 * IQR_val
+  upper_bound <- Q3 + 1.5 * IQR_val
+  return(list(lower_bound = lower_bound,
+              upper_bound = upper_bound,
+              outliers = x[x < lower_bound | x > upper_bound]))
+}
+# Detecting outliers for Closing_Price, Opening_Price, and Trade_Volume
+outliers_closing <- detect_outliers(stock_data$Closing_Price)
+outliers_opening <- detect_outliers(stock_data$Opening_Price)
+outliers_volume  <- detect_outliers(stock_data$Trade_Volume)
+cat("Number of outliers in Closing_Price:", length(outliers_closing$outliers), "\n")
+cat("Number of outliers in Opening_Price:", length(outliers_opening$outliers), "\n")
+cat("Number of outliers in Trade_Volume:", length(outliers_volume$outliers), "\n")
+# Ploting outlier distribution for Closing_Price
+ggplot(stock_data, aes(x = "", y = Closing_Price)) +
+  geom_boxplot(fill = "skyblue", outlier.colour = "red", outlier.shape = 16, outlier.size = 2) +
+  ggtitle("Boxplot for Closing_Price Outliers") +
+  xlab("") +
+  ylab("Closing_Price")
+# Since these outliers are created while overall data enrichment , so the original data aat this point remain un touched 
+# If handling is reguired then we following step:
+# Listing of numeric columns we want to check for outliers
+numeric_cols <- c("Closing_Price", "Opening_Price", "Trade_Volume")
+for (col_name in numeric_cols) {
+  Q1 <- quantile(stock_data[[col_name]], 0.25, na.rm = TRUE)
+  Q3 <- quantile(stock_data[[col_name]], 0.75, na.rm = TRUE)
+  IQR_val <- Q3 - Q1
+  lower_bound <- Q1 - 1.5 * IQR_val
+  upper_bound <- Q3 + 1.5 * IQR_val
+  # Filtering out rows with outliers for the current column
+  stock_data_updated <- stock_data %>%
+    filter(.data[[col_name]] >= lower_bound & .data[[col_name]] <= upper_bound)
+  cat("Outliers removed in", col_name, "\n")
+}
+cat("Total number of rows:", nrow(stock_data_updated), "\n")
+# 5F. Cross Validation 
+# Recomputing price_change_pct and comparing with the existing value using the same dataset
+stock_data_updated <- stock_data_updated %>%
+  mutate(computed_price_change = ((Closing_Price - Opening_Price) / Opening_Price) * 100)
+difference <- stock_data_updated %>%
+  mutate(diff = abs(price_change_pct - computed_price_change)) %>%
+  summarise(max_diff = max(diff, na.rm = TRUE))
+cat("Maximum difference between computed and stored price_change_pct:", difference$max_diff, "\n")
+# Saving the updated cleaned dataset
+write_csv(stock_data_updated, "cleaned_stock_data_updated.csv")
+cat("Cleaned dataset saved as cleaned_stock_data_updated.csv\n")

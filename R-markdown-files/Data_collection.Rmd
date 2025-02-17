@@ -1,0 +1,195 @@
+---
+title: "Stock Market Data Pipeline: From Web Scraping to Investment Analysis"
+author: "Yash Nayan 22BDS0274"
+date: "`r Sys.Date()`"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+suppressPackageStartupMessages({
+  library(quantmod)
+  library(rvest)
+  library(dplyr)
+  library(purrr) 
+  library(lubridate)
+  library(readr)
+  library(pander)
+  library(httr)
+})
+```
+## Data Collection
+#**1. Scraping Company Data using S&P500 and DOW-Analysis report**
+```{r}
+# Function to scrape S&P 500 data
+scrape_sp500 <- function(url) {
+  tryCatch({
+    page <- read_html(GET(url, user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36")))
+    table <- html_nodes(page, "table.wikitable")[[1]]
+    df <- html_table(table, fill = TRUE)
+    sp500_data <- df %>%
+      select(
+        Symbol = Symbol,
+        `GICS Sector` = `GICS Sector`,
+        `GICS Sub-Industry` = `GICS Sub-Industry`,
+        `Headquarters Location` = `Headquarters Location`,
+        `Date added` = `Date added`,
+        CIK = CIK,
+        Founded = Founded
+      )
+    return(sp500_data)
+  }, error = function(e) {
+    message("Error: ", e$message)
+    return(NULL)
+  })
+}
+url_sp500 <- "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+sp500_data <- scrape_sp500(url_sp500)
+```
+#**Scraping Company Data**
+```{r}
+# Defin URLs
+url_sp500 <- "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+url_market_cap <- "https://en.wikipedia.org/wiki/List_of_public_corporations_by_market_capitalization"
+# Function to extract company names and symbols from a Wikipedia table
+extract_company_data <- function(url, name_column, symbol_column = NULL) {
+  tryCatch({
+    page <- read_html(url)
+    table <- html_nodes(page, "table.wikitable")[[1]]  # Get first table
+    df <- html_table(table, fill = TRUE)
+    # Extract company names
+    companies <- df[[name_column]] %>% unique() %>% na.omit()
+    symbols <- if (!is.null(symbol_column)) {
+      df[[symbol_column]] %>% unique() %>% na.omit()
+    } else {
+      rep(NA_character_, length(companies))  # Use NA_character_ for consistency
+    }
+    data.frame(Company_Name = companies, Symbol = symbols, stringsAsFactors = FALSE)
+  }, error = function(e) {
+    message("Error accessing URL: ", url)
+    return(data.frame(Company_Name = character(0), Symbol = character(0)))
+  })
+}
+# Extract S&P 500 companies (using 'Security' for names and 'Symbol' for tickers)
+sp500_data <- extract_company_data(url_sp500, "Security", "Symbol")
+# Extract market cap companies (using 'Name' for names, no symbol column)
+market_cap_data <- extract_company_data(url_market_cap, "Name")
+all_data <- bind_rows(sp500_data, market_cap_data)# Combine the data
+all_data <- all_data %>%
+  distinct(Company_Name, .keep_all = TRUE)
+pander(head(all_data, 5))
+# Save as CSV
+write.csv(all_data, "company_names_and_symbols.csv", row.names = FALSE)
+cat("CSV file saved successfully with ", nrow(all_data), " companies.")
+```
+#**2 Scraping Stock Data Using Yahoo Finance API**
+```{r}
+# Set browser-like user-agent to avoid Yahoo Finance blocks
+options(HTTPUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36")
+# Read symbols and company names from the CSV file
+company_data <- read.csv("company_names_and_symbols.csv", stringsAsFactors = FALSE)
+symbols <- company_data$Symbol
+enterprise_names <- company_data$Company_Name
+# Fetch data for all symbols
+stock_data <- list()
+for (i in seq_along(symbols)) {
+  symbol <- symbols[i]
+  enterprise <- enterprise_names[i]
+  tryCatch({
+    # Fetch data from Yahoo Finance
+    data <- getSymbols(
+      symbol, 
+      src = "yahoo", 
+      from = "2019-01-01", 
+      to = "2024-01-01", 
+      auto.assign = FALSE
+    )
+    # Convert to dataframe with standardized column names
+    data_df <- data.frame(
+      date = index(data),
+      symbol = symbol,
+      enterprise = enterprise,
+      open = as.numeric(data[, paste0(symbol, ".Open")]),
+      high = as.numeric(data[, paste0(symbol, ".High")]),
+      low = as.numeric(data[, paste0(symbol, ".Low")]),
+      close = as.numeric(data[, paste0(symbol, ".Close")]),
+      volume = as.numeric(data[, paste0(symbol, ".Volume")])
+    )
+    # Append to list (more efficient)
+    stock_data[[symbol]] <- data_df
+    # Debug: Print number of rows fetched
+    message("Fetched ", nrow(data_df), " rows for ", symbol)
+  }, error = function(e) {
+    message("Failed to fetch data for ", symbol, ": ", e$message)
+  })
+}
+# Combine list into a single dataframe
+stock_data <- bind_rows(stock_data)
+# Check total rows and unique symbols
+message("Total rows fetched: ", nrow(stock_data))
+message("Unique symbols: ", paste(unique(stock_data$symbol), collapse = ", "))
+# Calculate year-wise averages
+# Calculate year-wise averages
+yearly_averages <- stock_data %>%
+  mutate(
+    date = as.Date(date),  # Fix: Convert to Date type
+    year = year(date)
+  ) %>%
+  group_by(symbol, enterprise, year) %>%
+  summarise(
+    avg_open = mean(open, na.rm = TRUE),
+    avg_high = mean(high, na.rm = TRUE),
+    avg_low = mean(low, na.rm = TRUE),
+    avg_close = mean(close, na.rm = TRUE),
+    avg_volume = mean(volume, na.rm = TRUE)
+  ) %>%
+  ungroup()
+# Save the yearly averages to a CSV file
+write.csv(yearly_averages, "yearly_averages.csv", row.names = FALSE)
+print("Yearly averages saved to yearly_averages.csv")
+```
+#**Creating a merged file for further processing**
+```{r}
+# Load Yahoo Finance yearly averages
+yahoo_data <- read.csv("yearly_averages.csv", stringsAsFactors = FALSE)
+# Load merged company data from Wikipedia
+wiki_data <- read.csv("merged_company_data.csv", stringsAsFactors = FALSE)
+# Standardize column names for merging
+yahoo_data <- yahoo_data %>%
+  rename(Symbol = symbol)  # Match column name with wiki_data
+# Merge datasets using Symbol as the key
+final_data <- yahoo_data %>%
+  left_join(wiki_data, by = "Symbol") %>%
+  # Clean and organize columns
+  select(
+    Symbol,
+    Company = Company_Name,
+    Year = year,
+    avg_open,
+    avg_high,
+    avg_low,
+    avg_close,
+    avg_volume,
+    GICS_Sector = GICS.Sector,
+    GICS_Sub_Industry = GICS.Sub.Industry,
+    Headquarters = Headquarters.Location,
+    Founded,
+    Industry,
+    Index_Weighting = Index.weighting
+  )
+write.csv(final_data, "final_dataset.csv", row.names = FALSE)
+
+
+
+# Handle NA values in critical columns
+final_data <- final_data %>%
+  mutate(
+    across(c(avg_open, avg_high, avg_low, avg_close, avg_volume), 
+           ~ ifelse(is.na(.), 0, .)),
+    across(c(GICS_Sector, GICS_Sub_Industry, Headquarters, Industry), 
+           ~ ifelse(is.na(.), "Unknown", .)),
+    Index_Weighting = ifelse(is.na(Index_Weighting), 0, Index_Weighting)
+  )
+# Save final merged dataset
+write.csv(final_data, "final_merged_dataset.csv", row.names = FALSE)
+print("Final merged dataset saved to final_merged_dataset.csv")
+```
