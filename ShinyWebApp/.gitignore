@@ -1,0 +1,8 @@
+# Ignore RStudio project files
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# Ignore rsconnect credentials
+rsconnect/
